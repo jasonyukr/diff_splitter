@@ -1,0 +1,8 @@
+[package]
+name = "diff_splitter"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+regex = "1.10" # Or the latest version
+tempfile = "3.10" # Or the latest version
