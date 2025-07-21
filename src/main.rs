@@ -168,7 +168,7 @@ fn process_file_diff(
     if stripped_path.as_os_str().is_empty() {
         return Ok(()); // Skip if the path is empty after stripping
     }
-    
+
     // Ensure the parent directory for the output file exists
     let output_file = target_dir.join(&stripped_path);
     if let Some(parent) = output_file.parent() {
