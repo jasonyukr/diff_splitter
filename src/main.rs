@@ -51,30 +51,65 @@ fn main() -> io::Result<()> {
     let re = Regex::new(r"(@@ -[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@)").unwrap();
 
     let mut buffer = Vec::new();
+    let mut header_state = HeaderState::Diff;
+
     while reader.read_until(b'\n', &mut buffer)? != 0 {
-        let line = String::from_utf8_lossy(&buffer);
+        let line = String::from_utf8_lossy(&buffer).into_owned();
 
-        if line.starts_with("diff --") {
-            if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
-                process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, hide_linenum)?;
+        match header_state {
+            HeaderState::Diff => {
+                if line.starts_with("diff --") {
+                    if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
+                        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, hide_linenum)?;
+                    }
+                    current_file_lines.clear();
+                    full_path = None;
+                    is_binary = false;
+                    current_file_lines.push(line.clone());
+                    header_state = HeaderState::From;
+                }
             }
-            current_file_lines.clear();
-            full_path = None;
-            is_binary = false;
-        }
-
-        if line.starts_with("Binary files") {
-            is_binary = true;
-        }
-
-        if line.starts_with("+++ ") {
-            let path_str = line.trim_end().trim_start_matches("+++ ").split('\t').next().unwrap_or("");
-            if !path_str.is_empty() {
-                full_path = Some(PathBuf::from(path_str));
+            HeaderState::From => {
+                if line.starts_with("--- ") {
+                    current_file_lines.push(line.clone());
+                    header_state = HeaderState::To;
+                } else {
+                    eprintln!("Error: Invalid diff format. Expected '--- ' line.");
+                    std::process::exit(1);
+                }
+            }
+            HeaderState::To => {
+                if line.starts_with("+++ ") {
+                    let path_str = line.trim_end().trim_start_matches("+++ ").split('\t').next().unwrap_or("");
+                    if !path_str.is_empty() {
+                        full_path = Some(PathBuf::from(path_str));
+                    }
+                    current_file_lines.push(line.clone());
+                    header_state = HeaderState::Body;
+                } else {
+                    eprintln!("Error: Invalid diff format. Expected '+++ ' line.");
+                    std::process::exit(1);
+                }
+            }
+            HeaderState::Body => {
+                if line.starts_with("diff --") {
+                    if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
+                        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, hide_linenum)?;
+                    }
+                    current_file_lines.clear();
+                    full_path = None;
+                    is_binary = false;
+                    current_file_lines.push(line.clone());
+                    header_state = HeaderState::From;
+                } else {
+                    if line.starts_with("Binary files") {
+                        is_binary = true;
+                    }
+                    current_file_lines.push(line.clone());
+                }
             }
         }
-        
-        current_file_lines.push(line.into_owned());
+
         buffer.clear();
     }
 
@@ -86,6 +121,13 @@ fn main() -> io::Result<()> {
     println!("Processing complete. Files created in '{}'.", target_dir.display());
 
     Ok(())
+}
+
+enum HeaderState {
+    Diff,
+    From,
+    To,
+    Body,
 }
 
 fn process_file_diff(
@@ -125,16 +167,20 @@ fn process_file_diff(
 
     // --- File Creation and Content Writing ---
     let mut output_file_handle = File::create(&output_file)?;
+    let mut header_processed = false;
 
     for line in lines {
         let trimmed_line = line.trim_end();
-        // Delete header lines
-        if trimmed_line.starts_with("diff --") || trimmed_line.starts_with("--- ") || trimmed_line.starts_with("+++ ") {
-            continue;
+
+        if !header_processed {
+            if trimmed_line.starts_with("diff --") || trimmed_line.starts_with("--- ") || trimmed_line.starts_with("+++ ") {
+                continue;
+            }
+            header_processed = true;
         }
 
         // Process @@ lines
-        if trimmed_line.starts_with("@@ ") && trimmed_line.ends_with(" @@") && hide_linenum {
+        if trimmed_line.starts_with("@@ ") && hide_linenum {
             let modified_line = re.replace_all(trimmed_line, |caps: &regex::Captures| {
                 let g1 = caps.get(1).map_or("", |m| m.as_str());
                 let g2 = caps.get(2).map_or("", |m| m.as_str());
