@@ -41,6 +41,7 @@ fn main() -> io::Result<()> {
 
     let mut current_file_lines: Vec<String> = Vec::new();
     let mut full_path: Option<PathBuf> = None;
+    let mut is_binary = false;
 
     // Regex for generalizing @@ lines
     let re = Regex::new(r"(@@ -[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@)").unwrap();
@@ -50,11 +51,16 @@ fn main() -> io::Result<()> {
         let line = String::from_utf8_lossy(&buffer);
 
         if line.starts_with("diff --") {
-            if !current_file_lines.is_empty() && full_path.is_some() {
+            if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
                 process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re)?;
             }
             current_file_lines.clear();
             full_path = None;
+            is_binary = false;
+        }
+
+        if line.starts_with("Binary files") {
+            is_binary = true;
         }
 
         if line.starts_with("+++ ") {
@@ -69,7 +75,7 @@ fn main() -> io::Result<()> {
     }
 
     // Process the last file's diff
-    if !current_file_lines.is_empty() && full_path.is_some() {
+    if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
         process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re)?;
     }
 
