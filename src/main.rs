@@ -71,6 +71,7 @@ fn main() -> io::Result<()> {
             }
             HeaderState::FromOrIndex => {
                 if line.starts_with("index ") {
+                    current_file_lines.push(line.clone());
                     header_state = HeaderState::From;
                 } else if line.starts_with("--- ") {
                     current_file_lines.push(line.clone());
@@ -185,7 +186,7 @@ fn process_file_diff(
         let trimmed_line = line.trim_end();
 
         if !header_processed {
-            if trimmed_line.starts_with("diff --") || trimmed_line.starts_with("--- ") || trimmed_line.starts_with("+++ ") {
+            if trimmed_line.starts_with("diff --") || trimmed_line.starts_with("index ") || trimmed_line.starts_with("--- ") || trimmed_line.starts_with("+++ ") {
                 continue;
             }
             header_processed = true;
