@@ -8,28 +8,32 @@ use regex::Regex;
 
 /// Splits a unified diff from standard input into individual files in a target directory.
 ///
-/// Each file's diff hunk(s) are written to a corresponding file, with '@@' lines
-/// generalized (line numbers before commas replaced by 'X's).
+/// Each file's diff hunk(s) are written to a corresponding file.
+/// If `--hide-linenum` is provided, '@@' lines are generalized
+/// (line numbers before commas replaced by 'X's).
 ///
 /// Usage:
-///   cat my_diff_file.diff | ./diff_splitter <target_directory> [strip_level]
+///   cat my_diff_file.diff | ./diff_splitter <target_directory> [strip_level] [--hide-linenum]
 ///
 /// Arguments:
 ///   <target_directory>: The directory where the output files will be created.
 ///   [strip_level]: (Optional) The number of leading path components to remove
 ///                  from the file paths found in the diff. Defaults to 2.
+///   [--hide-linenum]: (Optional) Flag to hide line numbers in '@@' hunk headers.
 fn main() -> io::Result<()> {
     // --- 1. Argument and Environment Validation ---
     let args: Vec<String> = env::args().collect();
+    let hide_linenum = args.iter().any(|arg| arg == "--hide-linenum");
+    let filtered_args: Vec<String> = args.into_iter().filter(|arg| arg != "--hide-linenum").collect();
 
-    if args.len() < 2 {
+    if filtered_args.len() < 2 {
         eprintln!("Error: Target directory not specified.");
-        eprintln!("Usage: {} <target_directory> [strip_level]", args[0]);
+        eprintln!("Usage: {} <target_directory> [strip_level] [--hide-linenum]", filtered_args.get(0).map_or("diff_splitter", |s| s.as_str()));
         std::process::exit(1);
     }
 
-    let target_dir = PathBuf::from(&args[1]);
-    let strip_level: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(2);
+    let target_dir = PathBuf::from(&filtered_args[1]);
+    let strip_level: usize = filtered_args.get(2).and_then(|s| s.parse().ok()).unwrap_or(2);
 
     // Create the target directory if it doesn't already exist.
     fs::create_dir_all(&target_dir)?;
@@ -52,7 +56,7 @@ fn main() -> io::Result<()> {
 
         if line.starts_with("diff --") {
             if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
-                process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re)?;
+                process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, hide_linenum)?;
             }
             current_file_lines.clear();
             full_path = None;
@@ -76,7 +80,7 @@ fn main() -> io::Result<()> {
 
     // Process the last file's diff
     if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
-        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re)?;
+        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, hide_linenum)?;
     }
 
     println!("Processing complete. Files created in '{}'.", target_dir.display());
@@ -90,6 +94,7 @@ fn process_file_diff(
     target_dir: &PathBuf,
     strip_level: usize,
     re: &Regex,
+    hide_linenum: bool,
 ) -> io::Result<()> {
     // --- Path Stripping Logic ---
     let stripped_path = if strip_level > 0 {
@@ -129,7 +134,7 @@ fn process_file_diff(
         }
 
         // Process @@ lines
-        if trimmed_line.starts_with("@@ ") {
+        if trimmed_line.starts_with("@@ ") && trimmed_line.ends_with(" @@") && hide_linenum {
             let modified_line = re.replace_all(trimmed_line, |caps: &regex::Captures| {
                 let g1 = caps.get(1).map_or("", |m| m.as_str());
                 let g2 = caps.get(2).map_or("", |m| m.as_str());
