@@ -66,7 +66,18 @@ fn main() -> io::Result<()> {
                     full_path = None;
                     is_binary = false;
                     current_file_lines.push(line.clone());
+                    header_state = HeaderState::FromOrIndex;
+                }
+            }
+            HeaderState::FromOrIndex => {
+                if line.starts_with("index ") {
                     header_state = HeaderState::From;
+                } else if line.starts_with("--- ") {
+                    current_file_lines.push(line.clone());
+                    header_state = HeaderState::To;
+                } else {
+                    eprintln!("Error: Invalid diff format. Expected 'index ' or '--- ' line.");
+                    std::process::exit(1);
                 }
             }
             HeaderState::From => {
@@ -100,7 +111,7 @@ fn main() -> io::Result<()> {
                     full_path = None;
                     is_binary = false;
                     current_file_lines.push(line.clone());
-                    header_state = HeaderState::From;
+                    header_state = HeaderState::FromOrIndex;
                 } else {
                     if line.starts_with("Binary files") {
                         is_binary = true;
@@ -125,6 +136,7 @@ fn main() -> io::Result<()> {
 
 enum HeaderState {
     Diff,
+    FromOrIndex,
     From,
     To,
     Body,
