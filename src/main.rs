@@ -48,9 +48,8 @@ fn main() -> io::Result<()> {
     let mut buffer = Vec::new();
     while reader.read_until(b'\n', &mut buffer)? != 0 {
         let line = String::from_utf8_lossy(&buffer);
-        let trimmed_line = line.trim_end();
 
-        if trimmed_line.starts_with("diff --") {
+        if line.starts_with("diff --") {
             if !current_file_lines.is_empty() && full_path.is_some() {
                 process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re)?;
             }
@@ -58,14 +57,14 @@ fn main() -> io::Result<()> {
             full_path = None;
         }
 
-        if trimmed_line.starts_with("+++ ") {
-            let path_str = trimmed_line.trim_start_matches("+++ ").split('\t').next().unwrap_or("");
+        if line.starts_with("+++ ") {
+            let path_str = line.trim_end().trim_start_matches("+++ ").split('\t').next().unwrap_or("");
             if !path_str.is_empty() {
                 full_path = Some(PathBuf::from(path_str));
             }
         }
         
-        current_file_lines.push(trimmed_line.to_string());
+        current_file_lines.push(line.into_owned());
         buffer.clear();
     }
 
@@ -117,14 +116,15 @@ fn process_file_diff(
     let mut output_file_handle = File::create(&output_file)?;
 
     for line in lines {
+        let trimmed_line = line.trim_end();
         // Delete header lines
-        if line.starts_with("diff --") || line.starts_with("--- ") || line.starts_with("+++ ") {
+        if trimmed_line.starts_with("diff --") || trimmed_line.starts_with("--- ") || trimmed_line.starts_with("+++ ") {
             continue;
         }
 
         // Process @@ lines
-        if line.starts_with("@@ ") {
-            let modified_line = re.replace_all(line, |caps: &regex::Captures| {
+        if trimmed_line.starts_with("@@ ") {
+            let modified_line = re.replace_all(trimmed_line, |caps: &regex::Captures| {
                 let g1 = caps.get(1).map_or("", |m| m.as_str());
                 let g2 = caps.get(2).map_or("", |m| m.as_str());
                 let g3 = caps.get(3).map_or("", |m| m.as_str());
@@ -134,11 +134,11 @@ fn process_file_diff(
                 let g1_x = re_digit.replace_all(g1, "X");
                 let g3_x = re_digit.replace_all(g3, "X");
 
-                format!("{}{}{}{}{}", g1_x, g2, g3_x, g4, g5)
+                format!("{}{}{}{}{}\n", g1_x, g2, g3_x, g4, g5)
             });
-            writeln!(output_file_handle, "{}", modified_line)?;
+            write!(output_file_handle, "{}", modified_line)?;
         } else {
-            writeln!(output_file_handle, "{}", line)?;
+            write!(output_file_handle, "{}", line)?;
         }
     }
 
