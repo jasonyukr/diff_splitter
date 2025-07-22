@@ -1,42 +1,36 @@
 use std::{
-    env,
     fs::{self, File},
     io::{self, BufRead, BufReader, Write},
     path::PathBuf,
 };
 use regex::Regex;
+use clap::Parser;
 
 /// Splits a unified diff from standard input into individual files in a target directory.
-///
-/// Each file's diff hunk(s) are written to a corresponding file.
-/// If `--mask-linenum` is provided, '@@' lines are generalized
-/// (line numbers before commas replaced by 'X's).
-///
-/// Usage:
-///   cat my_diff_file.diff | ./diff_splitter <target_directory> [strip_level] [--mask-linenum]
-///
-/// Arguments:
-///   <target_directory>: The directory where the output files will be created.
-///   [strip_level]: (Optional) The number of leading path components to remove
-///                  from the file paths found in the diff. Defaults to 2.
-///   [--mask-linenum]: (Optional) Flag to hide line numbers in '@@' hunk headers.
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// The directory where the output files will be created
+    target_path: PathBuf,
+
+    /// The number of leading path components to remove from the file paths found in the diff
+    #[arg(long, default_value_t = 2)]
+    strip: usize,
+
+    /// Flag to hide line numbers in '@@' hunk headers
+    #[arg(long)]
+    mask_linenum: bool,
+
+    /// Flag to skip the diff header
+    #[arg(long)]
+    skip_header: bool,
+}
+
 fn main() -> io::Result<()> {
-    // --- 1. Argument and Environment Validation ---
-    let args: Vec<String> = env::args().collect();
-    let mask_linenum = args.iter().any(|arg| arg == "--mask-linenum");
-    let filtered_args: Vec<String> = args.into_iter().filter(|arg| arg != "--mask-linenum").collect();
-
-    if filtered_args.len() < 2 {
-        eprintln!("Error: Target directory not specified.");
-        eprintln!("Usage: {} <target_directory> [strip_level] [--mask-linenum]", filtered_args.get(0).map_or("diff_splitter", |s| s.as_str()));
-        std::process::exit(1);
-    }
-
-    let target_dir = PathBuf::from(&filtered_args[1]);
-    let strip_level: usize = filtered_args.get(2).and_then(|s| s.parse().ok()).unwrap_or(2);
+    let args = Args::parse();
 
     // Create the target directory if it doesn't already exist.
-    fs::create_dir_all(&target_dir)?;
+    fs::create_dir_all(&args.target_path)?;
 
     // --- 2. In-Memory Diff Processing ---
 
@@ -49,7 +43,7 @@ fn main() -> io::Result<()> {
 
     // Regex for generalizing @@ lines
     let re = Regex::new(r"(@@ -[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@)").unwrap();
-    // Regex for @@@ lines for --cc
+    // Regex for @@@ lines for "--cc" and "--combine"
     let re_combine = Regex::new(r"(@@@ -[0-9]+)(,[0-9]+)?( \-[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@@)").unwrap();
 
     let mut buffer = Vec::new();
@@ -62,7 +56,7 @@ fn main() -> io::Result<()> {
             HeaderState::Diff => {
                 if line.starts_with("diff --") {
                     if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
-                        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, &re_combine, mask_linenum)?;
+                        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &args, &re, &re_combine)?;
                     }
                     current_file_lines.clear();
                     full_path = None;
@@ -108,7 +102,7 @@ fn main() -> io::Result<()> {
             HeaderState::Body => {
                 if line.starts_with("diff --") {
                     if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
-                        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, &re_combine, mask_linenum)?;
+                        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &args, &re, &re_combine)?;
                     }
                     current_file_lines.clear();
                     full_path = None;
@@ -129,10 +123,10 @@ fn main() -> io::Result<()> {
 
     // Process the last file's diff
     if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
-        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, &re_combine, mask_linenum)?;
+        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &args, &re, &re_combine)?;
     }
 
-    println!("Processing complete. Files created in '{}'.", target_dir.display());
+    println!("Processing complete. Files created in '{}'.", args.target_path.display());
 
     Ok(())
 }
@@ -148,17 +142,15 @@ enum HeaderState {
 fn process_file_diff(
     lines: &[String],
     full_path_buf: &PathBuf,
-    target_dir: &PathBuf,
-    strip_level: usize,
+    args: &Args,
     re: &Regex,
     re_combine: &Regex,
-    mask_linenum: bool,
 ) -> io::Result<()> {
     // --- Path Stripping Logic ---
-    let stripped_path = if strip_level > 0 {
+    let stripped_path = if args.strip > 0 {
         let components: Vec<_> = full_path_buf.components().collect();
-        if components.len() > strip_level {
-            components[strip_level..].iter().collect::<PathBuf>()
+        if components.len() > args.strip {
+            components[args.strip..].iter().collect::<PathBuf>()
         } else {
             full_path_buf.file_name().map_or_else(
                 || PathBuf::from(""),
@@ -174,7 +166,7 @@ fn process_file_diff(
     }
 
     // Ensure the parent directory for the output file exists
-    let output_file = target_dir.join(&stripped_path);
+    let output_file = args.target_path.join(&stripped_path);
     if let Some(parent) = output_file.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -189,13 +181,13 @@ fn process_file_diff(
         let trimmed_line = line.trim_end();
 
         if !header_processed {
-            if trimmed_line.starts_with("diff --") || trimmed_line.starts_with("index ") || trimmed_line.starts_with("--- ") || trimmed_line.starts_with("+++ ") {
+            if args.skip_header && (trimmed_line.starts_with("diff --") || trimmed_line.starts_with("index ") || trimmed_line.starts_with("--- ") || trimmed_line.starts_with("+++ ")) {
                 continue;
             }
             header_processed = true;
         }
 
-        if mask_linenum {
+        if args.mask_linenum {
             // Process @@ lines
             if trimmed_line.starts_with("@@ ") {
                 let line_to_process;
