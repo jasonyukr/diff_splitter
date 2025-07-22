@@ -13,7 +13,8 @@ struct Args {
     /// The directory where the output files will be created
     target_path: PathBuf,
 
-    /// The number of leading path components to remove from the file paths found in the diff. The default is autodetect. #[arg(long, default_value_t = -1)]
+    /// The number of leading path components to remove from the file paths found in the diff (default is auto-detect)
+    #[arg(long, default_value_t = -1)]
     strip: i32,
 
     /// Flag to hide line numbers in '@@' hunk headers
