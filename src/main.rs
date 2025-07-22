@@ -14,8 +14,8 @@ struct Args {
     target_path: PathBuf,
 
     /// The number of leading path components to remove from the file paths found in the diff
-    #[arg(long, default_value_t = 2)]
-    strip: usize,
+    #[arg(long, default_value_t = -1)]
+    strip: i32,
 
     /// Flag to hide line numbers in '@@' hunk headers
     #[arg(long)]
@@ -88,7 +88,7 @@ fn main() -> io::Result<()> {
             }
             HeaderState::To => {
                 if line.starts_with("+++ ") {
-                    let path_str = line.trim_end().trim_start_matches("+++ ").split('\t').next().unwrap_or("");
+                    let path_str = extract_path(&line, "+++ ");
                     if !path_str.is_empty() {
                         full_path = Some(PathBuf::from(path_str));
                     }
@@ -139,6 +139,11 @@ enum HeaderState {
     Body,
 }
 
+fn extract_path<'a>(line: &'a str, prefix: &str) -> &'a str {
+    let line = line.trim_start_matches(prefix).trim();
+    line.split('\t').next().unwrap_or(line)
+}
+
 fn process_file_diff(
     lines: &[String],
     full_path_buf: &PathBuf,
@@ -146,11 +151,30 @@ fn process_file_diff(
     re: &Regex,
     re_combine: &Regex,
 ) -> io::Result<()> {
+    let from_path_str = lines
+        .iter()
+        .find(|line| line.starts_with("--- "))
+        .map(|line| extract_path(line, "--- "))
+        .unwrap_or("");
+
+    let to_path_str = lines
+        .iter()
+        .find(|line| line.starts_with("+++ "))
+        .map(|line| extract_path(line, "+++ "))
+        .unwrap_or("");
+
+
+    let strip_value = if args.strip == -1 {
+        calculate_strip_value(from_path_str, to_path_str)
+    } else {
+        args.strip as usize
+    };
+
     // --- Path Stripping Logic ---
-    let stripped_path = if args.strip > 0 {
+    let stripped_path = if strip_value > 0 {
         let components: Vec<_> = full_path_buf.components().collect();
-        if components.len() > args.strip {
-            components[args.strip..].iter().collect::<PathBuf>()
+        if components.len() > strip_value {
+            components[strip_value..].iter().collect::<PathBuf>()
         } else {
             full_path_buf.file_name().map_or_else(
                 || PathBuf::from(""),
@@ -249,5 +273,16 @@ fn process_file_diff(
     }
 
     Ok(())
+}
+
+fn calculate_strip_value(from_path: &str, to_path: &str) -> usize {
+    let from_path_buf = PathBuf::from(from_path);
+    let from_components: Vec<_> = from_path_buf.components().collect();
+    let to_path_buf = PathBuf::from(to_path);
+    let to_components: Vec<_> = to_path_buf.components().collect();
+
+    let common_suffix_len = from_components.iter().rev().zip(to_components.iter().rev()).take_while(|(a, b)| a == b).count();
+
+    from_components.len() - common_suffix_len
 }
 
