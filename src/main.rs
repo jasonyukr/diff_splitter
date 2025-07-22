@@ -63,28 +63,28 @@ fn main() -> io::Result<()> {
                     full_path = None;
                     is_binary = false;
                     current_file_lines.push(line.clone());
-                    header_state = HeaderState::FromOrIndex;
-                }
-            }
-            HeaderState::FromOrIndex => {
-                if line.starts_with("index ") {
-                    current_file_lines.push(line.clone());
                     header_state = HeaderState::From;
-                } else if line.starts_with("--- ") {
-                    current_file_lines.push(line.clone());
-                    header_state = HeaderState::To;
-                } else {
-                    eprintln!("Error: Invalid diff format. Expected 'index ' or '--- ' line !!!!");
-                    std::process::exit(1);
                 }
             }
             HeaderState::From => {
                 if line.starts_with("--- ") {
                     current_file_lines.push(line.clone());
                     header_state = HeaderState::To;
-                } else {
-                    eprintln!("Error: Invalid diff format. Expected '--- ' line !!!!");
+                } else if line.starts_with("+++ ") {
+                    eprintln!("Error: Invalid diff format. Expected '---' or metadata line !!!!");
+                    eprintln!("{}", line);
                     std::process::exit(1);
+                } else {
+                    /*
+                     * The metadata line examples that come before "---" line
+                     *
+                     * index c5e57bdf1ad3..dad03b5bcf46 100644
+                     * new file mode 100644
+                     * similarity index 100%
+                     * rename from jdk/src/solaris/legal/pipewire.md
+                     * rename to jdk/doc/legal/jdk/unix/pipewire.md
+                     */
+                    current_file_lines.push(line.clone());
                 }
             }
             HeaderState::To => {
@@ -96,7 +96,8 @@ fn main() -> io::Result<()> {
                     current_file_lines.push(line.clone());
                     header_state = HeaderState::Body;
                 } else {
-                    eprintln!("Error: Invalid diff format. Expected '+++ ' line !!!!");
+                    eprintln!("Error: Invalid diff format. Expected '+++' line !!!!");
+                    eprintln!("{}", line);
                     std::process::exit(1);
                 }
             }
@@ -109,7 +110,7 @@ fn main() -> io::Result<()> {
                     full_path = None;
                     is_binary = false;
                     current_file_lines.push(line.clone());
-                    header_state = HeaderState::FromOrIndex;
+                    header_state = HeaderState::From;
                 } else {
                     if line.starts_with("Binary files ") {
                         is_binary = true;
@@ -143,7 +144,6 @@ fn main() -> io::Result<()> {
 
 enum HeaderState {
     Diff,
-    FromOrIndex,
     From,
     To,
     Body,
@@ -215,7 +215,13 @@ fn process_file_diff(
         let trimmed_line = line.trim_end();
 
         if !header_processed {
-            if args.skip_header && (trimmed_line.starts_with("diff --") || trimmed_line.starts_with("index ") || trimmed_line.starts_with("--- ") || trimmed_line.starts_with("+++ ")) {
+            if args.skip_header && (trimmed_line.starts_with("diff --") ||
+                trimmed_line.starts_with("index") || 
+                trimmed_line.starts_with("new") ||
+                trimmed_line.starts_with("old") ||
+                trimmed_line.starts_with("similarity") ||
+                trimmed_line.starts_with("rename") ||
+                trimmed_line.starts_with("--- ") || trimmed_line.starts_with("+++ ")) {
                 continue;
             }
             header_processed = true;
