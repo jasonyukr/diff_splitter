@@ -32,7 +32,7 @@ fn main() -> io::Result<()> {
     // Create the target directory if it doesn't already exist.
     fs::create_dir_all(&args.target_path)?;
 
-    // --- 2. In-Memory Diff Processing ---
+    // --- In-Memory Diff Processing ---
 
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin.lock());
@@ -212,7 +212,6 @@ fn process_file_diff(
         }
 
         if args.mask_linenum {
-            // Process @@ lines
             if trimmed_line.starts_with("@@ ") {
                 let line_to_process;
                 let mut line_remain = "";
