@@ -37,6 +37,7 @@ fn main() -> io::Result<()> {
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin.lock());
 
+    let mut binary_file_lines: Vec<String> = Vec::new();
     let mut current_file_lines: Vec<String> = Vec::new();
     let mut full_path: Option<PathBuf> = None;
     let mut is_binary = false;
@@ -110,8 +111,9 @@ fn main() -> io::Result<()> {
                     current_file_lines.push(line.clone());
                     header_state = HeaderState::FromOrIndex;
                 } else {
-                    if line.starts_with("Binary files") {
+                    if line.starts_with("Binary files ") {
                         is_binary = true;
+                        binary_file_lines.push(line.trim_end().to_string());
                     }
                     current_file_lines.push(line.clone());
                 }
@@ -124,6 +126,9 @@ fn main() -> io::Result<()> {
     // Process the last file's diff
     if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
         process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &args, &re, &re_combine)?;
+    }
+    for element in &binary_file_lines {
+        println!("{}", element);
     }
 
     println!("Processing complete. Files created in '{}'.", args.target_path.display());
