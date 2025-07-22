@@ -9,26 +9,26 @@ use regex::Regex;
 /// Splits a unified diff from standard input into individual files in a target directory.
 ///
 /// Each file's diff hunk(s) are written to a corresponding file.
-/// If `--hide-linenum` is provided, '@@' lines are generalized
+/// If `--mask-linenum` is provided, '@@' lines are generalized
 /// (line numbers before commas replaced by 'X's).
 ///
 /// Usage:
-///   cat my_diff_file.diff | ./diff_splitter <target_directory> [strip_level] [--hide-linenum]
+///   cat my_diff_file.diff | ./diff_splitter <target_directory> [strip_level] [--mask-linenum]
 ///
 /// Arguments:
 ///   <target_directory>: The directory where the output files will be created.
 ///   [strip_level]: (Optional) The number of leading path components to remove
 ///                  from the file paths found in the diff. Defaults to 2.
-///   [--hide-linenum]: (Optional) Flag to hide line numbers in '@@' hunk headers.
+///   [--mask-linenum]: (Optional) Flag to hide line numbers in '@@' hunk headers.
 fn main() -> io::Result<()> {
     // --- 1. Argument and Environment Validation ---
     let args: Vec<String> = env::args().collect();
-    let hide_linenum = args.iter().any(|arg| arg == "--hide-linenum");
-    let filtered_args: Vec<String> = args.into_iter().filter(|arg| arg != "--hide-linenum").collect();
+    let mask_linenum = args.iter().any(|arg| arg == "--mask-linenum");
+    let filtered_args: Vec<String> = args.into_iter().filter(|arg| arg != "--mask-linenum").collect();
 
     if filtered_args.len() < 2 {
         eprintln!("Error: Target directory not specified.");
-        eprintln!("Usage: {} <target_directory> [strip_level] [--hide-linenum]", filtered_args.get(0).map_or("diff_splitter", |s| s.as_str()));
+        eprintln!("Usage: {} <target_directory> [strip_level] [--mask-linenum]", filtered_args.get(0).map_or("diff_splitter", |s| s.as_str()));
         std::process::exit(1);
     }
 
@@ -49,6 +49,8 @@ fn main() -> io::Result<()> {
 
     // Regex for generalizing @@ lines
     let re = Regex::new(r"(@@ -[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@)").unwrap();
+    // Regex for @@@ lines for --cc
+    let re_combine = Regex::new(r"(@@@ -[0-9]+)(,[0-9]+)?( \-[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@@)").unwrap();
 
     let mut buffer = Vec::new();
     let mut header_state = HeaderState::Diff;
@@ -60,7 +62,7 @@ fn main() -> io::Result<()> {
             HeaderState::Diff => {
                 if line.starts_with("diff --") {
                     if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
-                        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, hide_linenum)?;
+                        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, &re_combine, mask_linenum)?;
                     }
                     current_file_lines.clear();
                     full_path = None;
@@ -106,7 +108,7 @@ fn main() -> io::Result<()> {
             HeaderState::Body => {
                 if line.starts_with("diff --") {
                     if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
-                        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, hide_linenum)?;
+                        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, &re_combine, mask_linenum)?;
                     }
                     current_file_lines.clear();
                     full_path = None;
@@ -127,7 +129,7 @@ fn main() -> io::Result<()> {
 
     // Process the last file's diff
     if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
-        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, hide_linenum)?;
+        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &target_dir, strip_level, &re, &re_combine, mask_linenum)?;
     }
 
     println!("Processing complete. Files created in '{}'.", target_dir.display());
@@ -149,7 +151,8 @@ fn process_file_diff(
     target_dir: &PathBuf,
     strip_level: usize,
     re: &Regex,
-    hide_linenum: bool,
+    re_combine: &Regex,
+    mask_linenum: bool,
 ) -> io::Result<()> {
     // --- Path Stripping Logic ---
     let stripped_path = if strip_level > 0 {
@@ -192,21 +195,62 @@ fn process_file_diff(
             header_processed = true;
         }
 
-        // Process @@ lines
-        if trimmed_line.starts_with("@@ ") && hide_linenum {
-            let modified_line = re.replace_all(trimmed_line, |caps: &regex::Captures| {
-                let g1 = caps.get(1).map_or("", |m| m.as_str());
-                let g2 = caps.get(2).map_or("", |m| m.as_str());
-                let g3 = caps.get(3).map_or("", |m| m.as_str());
-                let g4 = caps.get(4).map_or("", |m| m.as_str());
-                let g5 = caps.get(5).map_or("", |m| m.as_str());
+        if mask_linenum {
+            // Process @@ lines
+            if trimmed_line.starts_with("@@ ") {
+                let line_to_process;
+                let mut line_remain = "";
+                let parts: Vec<&str> = trimmed_line.splitn(3, "@@").collect();
+                if parts.len() > 2 {
+                    line_to_process = format!("@@{}@@", parts[1]);
+                    line_remain = parts[2];
+                } else {
+                    line_to_process = trimmed_line.to_string();
+                }
 
-                let g1_x = re_digit.replace_all(g1, "X");
-                let g3_x = re_digit.replace_all(g3, "X");
+                let modified_line = re.replace_all(&line_to_process, |caps: &regex::Captures| {
+                    let g1 = caps.get(1).map_or("", |m| m.as_str());
+                    let g2 = caps.get(2).map_or("", |m| m.as_str());
+                    let g3 = caps.get(3).map_or("", |m| m.as_str());
+                    let g4 = caps.get(4).map_or("", |m| m.as_str());
+                    let g5 = caps.get(5).map_or("", |m| m.as_str());
 
-                format!("{}{}{}{}{}\n", g1_x, g2, g3_x, g4, g5)
-            });
-            write!(output_file_handle, "{}", modified_line)?;
+                    let g1_x = re_digit.replace_all(g1, "X");
+                    let g3_x = re_digit.replace_all(g3, "X");
+
+                    format!("{}{}{}{}{}{}\n", g1_x, g2, g3_x, g4, g5, line_remain)
+                });
+                write!(output_file_handle, "{}", modified_line)?;
+            } else if trimmed_line.starts_with("@@@ ") {
+                let line_to_process;
+                let mut line_remain = "";
+                let parts: Vec<&str> = trimmed_line.splitn(3, "@@@").collect();
+                if parts.len() > 2 {
+                    line_to_process = format!("@@@{}@@@", parts[1]);
+                    line_remain = parts[2];
+                } else {
+                    line_to_process = trimmed_line.to_string();
+                }
+
+                let modified_line = re_combine.replace_all(&line_to_process, |caps: &regex::Captures| {
+                    let g1 = caps.get(1).map_or("", |m| m.as_str());
+                    let g2 = caps.get(2).map_or("", |m| m.as_str());
+                    let g3 = caps.get(3).map_or("", |m| m.as_str());
+                    let g4 = caps.get(4).map_or("", |m| m.as_str());
+                    let g5 = caps.get(5).map_or("", |m| m.as_str());
+                    let g6 = caps.get(6).map_or("", |m| m.as_str());
+                    let g7 = caps.get(7).map_or("", |m| m.as_str());
+
+                    let g1_x = re_digit.replace_all(g1, "X");
+                    let g3_x = re_digit.replace_all(g3, "X");
+                    let g5_x = re_digit.replace_all(g5, "X");
+
+                    format!("{}{}{}{}{}{}{}{}\n", g1_x, g2, g3_x, g4, g5_x, g6, g7, line_remain)
+                });
+                write!(output_file_handle, "{}", modified_line)?;
+            } else {
+                write!(output_file_handle, "{}", line)?;
+            }
         } else {
             write!(output_file_handle, "{}", line)?;
         }
