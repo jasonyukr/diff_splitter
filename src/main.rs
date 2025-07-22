@@ -13,8 +13,7 @@ struct Args {
     /// The directory where the output files will be created
     target_path: PathBuf,
 
-    /// The number of leading path components to remove from the file paths found in the diff
-    #[arg(long, default_value_t = -1)]
+    /// The number of leading path components to remove from the file paths found in the diff. The default is autodetect. #[arg(long, default_value_t = -1)]
     strip: i32,
 
     /// Flag to hide line numbers in '@@' hunk headers
@@ -73,7 +72,7 @@ fn main() -> io::Result<()> {
                     current_file_lines.push(line.clone());
                     header_state = HeaderState::To;
                 } else {
-                    eprintln!("Error: Invalid diff format. Expected 'index ' or '--- ' line.");
+                    eprintln!("Error: Invalid diff format. Expected 'index ' or '--- ' line !!!!");
                     std::process::exit(1);
                 }
             }
@@ -82,7 +81,7 @@ fn main() -> io::Result<()> {
                     current_file_lines.push(line.clone());
                     header_state = HeaderState::To;
                 } else {
-                    eprintln!("Error: Invalid diff format. Expected '--- ' line.");
+                    eprintln!("Error: Invalid diff format. Expected '--- ' line !!!!");
                     std::process::exit(1);
                 }
             }
@@ -95,7 +94,7 @@ fn main() -> io::Result<()> {
                     current_file_lines.push(line.clone());
                     header_state = HeaderState::Body;
                 } else {
-                    eprintln!("Error: Invalid diff format. Expected '+++ ' line.");
+                    eprintln!("Error: Invalid diff format. Expected '+++ ' line !!!!");
                     std::process::exit(1);
                 }
             }
@@ -284,4 +283,3 @@ fn calculate_strip_value(from_path: &str, to_path: &str) -> usize {
 
     from_components.len() - common_suffix_len
 }
-
