@@ -127,8 +127,13 @@ fn main() -> io::Result<()> {
     if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
         process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &args, &re, &re_combine)?;
     }
-    for element in &binary_file_lines {
-        println!("{}", element);
+
+    if !binary_file_lines.is_empty() {
+        let binary_files_path = args.target_path.join("__BINARY_FILES__.txt");
+        let mut binary_files_file = File::create(&binary_files_path)?;
+        for line in &binary_file_lines {
+            writeln!(binary_files_file, "{}", line)?;
+        }
     }
 
     println!("Processing complete. Files created in '{}'.", args.target_path.display());
