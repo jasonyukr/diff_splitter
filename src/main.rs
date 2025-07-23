@@ -17,7 +17,7 @@ struct Args {
     #[arg(long, default_value_t = -1)]
     strip: i32,
 
-    /// Flag to hide line numbers in '@@' hunk headers
+    /// Flag to mask line numbers in '@@' or '@@@' hunk headers
     #[arg(long)]
     mask_linenum: bool,
 
@@ -32,8 +32,6 @@ fn main() -> io::Result<()> {
     // Create the target directory if it doesn't already exist.
     fs::create_dir_all(&args.target_path)?;
 
-    // --- In-Memory Diff Processing ---
-
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin.lock());
 
@@ -42,9 +40,9 @@ fn main() -> io::Result<()> {
     let mut full_path: Option<PathBuf> = None;
     let mut is_binary = false;
 
-    // Regex for generalizing @@ lines
+    // Regex for generalizing "@@" lines
     let re = Regex::new(r"(@@ -[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@)").unwrap();
-    // Regex for @@@ lines for "--cc" and "--combine"
+    // Regex for "@@@" lines for "--cc" and "--combined"
     let re_combine = Regex::new(r"(@@@ -[0-9]+)(,[0-9]+)?( \-[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@@)").unwrap();
 
     let mut buffer = Vec::new();
@@ -76,13 +74,14 @@ fn main() -> io::Result<()> {
                     std::process::exit(1);
                 } else {
                     /*
-                     * The metadata line examples that come before "---" line
+                     * The metadata line examples that can come before "---" line
                      *
                      * index c5e57bdf1ad3..dad03b5bcf46 100644
                      * new file mode 100644
                      * similarity index 100%
                      * rename from jdk/src/solaris/legal/pipewire.md
                      * rename to jdk/doc/legal/jdk/unix/pipewire.md
+                     * ...
                      */
                     current_file_lines.push(line.clone());
                 }
@@ -129,6 +128,7 @@ fn main() -> io::Result<()> {
         process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &args, &re, &re_combine)?;
     }
 
+    // Save the "Binary files" lines to distinct file
     if !binary_file_lines.is_empty() {
         let binary_files_path = args.target_path.join("__BINARY_FILES__.txt");
         let mut binary_files_file = File::create(&binary_files_path)?;
@@ -138,7 +138,6 @@ fn main() -> io::Result<()> {
     }
 
     println!("Processing complete. Files created in '{}'.", args.target_path.display());
-
     Ok(())
 }
 
@@ -180,7 +179,7 @@ fn process_file_diff(
         args.strip as usize
     };
 
-    // --- Path Stripping Logic ---
+    // Path stripping logic
     let stripped_path = if strip_value > 0 {
         let components: Vec<_> = full_path_buf.components().collect();
         if components.len() > strip_value {
@@ -207,7 +206,7 @@ fn process_file_diff(
 
     let re_digit = Regex::new(r"[0-9]").unwrap();
 
-    // --- File Creation and Content Writing ---
+    // File creation and content writing
     let mut output_file_handle = File::create(&output_file)?;
     let mut header_processed = false;
 
@@ -216,7 +215,7 @@ fn process_file_diff(
 
         if !header_processed {
             if args.skip_header && (trimmed_line.starts_with("diff --") ||
-                trimmed_line.starts_with("index") || 
+                trimmed_line.starts_with("index") ||
                 trimmed_line.starts_with("new") ||
                 trimmed_line.starts_with("old") ||
                 trimmed_line.starts_with("similarity") ||
