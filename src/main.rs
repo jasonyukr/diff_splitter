@@ -42,7 +42,7 @@ fn main() -> io::Result<()> {
 
     // Regex for generalizing "@@" lines
     let re = Regex::new(r"(@@ -[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@)").unwrap();
-    // Regex for "@@@" lines for "--cc" and "--combined"
+    // Regex for "@@@" lines ("--cc" and "--combined")
     let re_combine = Regex::new(r"(@@@ -[0-9]+)(,[0-9]+)?( \-[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@@)").unwrap();
 
     let mut buffer = Vec::new();
