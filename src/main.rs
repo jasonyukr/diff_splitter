@@ -271,9 +271,9 @@ fn process_file_diff(
                     let g6 = caps.get(6).map_or("", |m| m.as_str());
                     let g7 = caps.get(7).map_or("", |m| m.as_str());
 
-                    let g1_x = re_digit.replace_all(g1, "X");
-                    let g3_x = re_digit.replace_all(g3, "X");
-                    let g5_x = re_digit.replace_all(g5, "X");
+                    let g1_x = re_digit.replace_all(g1, "0");
+                    let g3_x = re_digit.replace_all(g3, "0");
+                    let g5_x = re_digit.replace_all(g5, "0");
 
                     format!("{}{}{}{}{}{}{}{}\n", g1_x, g2, g3_x, g4, g5_x, g6, g7, line_remain)
                 });
