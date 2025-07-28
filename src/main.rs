@@ -245,8 +245,8 @@ fn process_file_diff(
                     let g4 = caps.get(4).map_or("", |m| m.as_str());
                     let g5 = caps.get(5).map_or("", |m| m.as_str());
 
-                    let g1_x = re_digit.replace_all(g1, "X");
-                    let g3_x = re_digit.replace_all(g3, "X");
+                    let g1_x = re_digit.replace_all(g1, "0");
+                    let g3_x = re_digit.replace_all(g3, "0");
 
                     format!("{}{}{}{}{}{}\n", g1_x, g2, g3_x, g4, g5, line_remain)
                 });
