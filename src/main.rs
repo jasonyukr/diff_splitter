@@ -38,7 +38,6 @@ fn main() -> io::Result<()> {
     let mut binary_file_lines: Vec<String> = Vec::new();
     let mut current_file_lines: Vec<String> = Vec::new();
     let mut full_path: Option<PathBuf> = None;
-    let mut is_binary = false;
 
     // Regex for generalizing "@@" lines
     let re = Regex::new(r"(@@ -[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@)").unwrap();
@@ -54,14 +53,19 @@ fn main() -> io::Result<()> {
         match header_state {
             HeaderState::Diff => {
                 if line.starts_with("diff --") {
-                    if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
+                    if !current_file_lines.is_empty() && full_path.is_some() {
                         process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &args, &re, &re_combine)?;
                     }
                     current_file_lines.clear();
                     full_path = None;
-                    is_binary = false;
                     current_file_lines.push(line.clone());
                     header_state = HeaderState::From;
+                } else if line.starts_with("Binary files ") {
+                    binary_file_lines.push(line.trim_end().to_string());
+                } else {
+                    eprintln!("Error: Invalid diff format !!!!");
+                    eprintln!("{}", line);
+                    std::process::exit(1);
                 }
             }
             HeaderState::From => {
@@ -102,19 +106,16 @@ fn main() -> io::Result<()> {
             }
             HeaderState::Body => {
                 if line.starts_with("diff --") {
-                    if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
+                    if !current_file_lines.is_empty() && full_path.is_some() {
                         process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &args, &re, &re_combine)?;
                     }
                     current_file_lines.clear();
                     full_path = None;
-                    is_binary = false;
                     current_file_lines.push(line.clone());
                     header_state = HeaderState::From;
+                } else if line.starts_with("Binary files ") {
+                    binary_file_lines.push(line.trim_end().to_string());
                 } else {
-                    if line.starts_with("Binary files ") {
-                        is_binary = true;
-                        binary_file_lines.push(line.trim_end().to_string());
-                    }
                     current_file_lines.push(line.clone());
                 }
             }
@@ -124,7 +125,7 @@ fn main() -> io::Result<()> {
     }
 
     // Process the last file's diff
-    if !current_file_lines.is_empty() && full_path.is_some() && !is_binary {
+    if !current_file_lines.is_empty() && full_path.is_some() {
         process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &args, &re, &re_combine)?;
     }
 
