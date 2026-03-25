@@ -1,6 +1,6 @@
 mod common;
 
-use common::{list_output_files, read_output, run_diff_splitter};
+use common::{list_output_files, read_output, read_output_bytes, run_diff_splitter};
 
 #[test]
 fn plain_unified_diff_with_prelude_and_timestamps_is_split() {
@@ -192,5 +192,21 @@ fn parent_directory_escape_paths_are_rejected() {
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("Refusing to write outside target path")
+    );
+}
+
+#[test]
+fn non_utf8_hunk_bytes_are_preserved() {
+    let diff = b"diff --git a/src/copyright.txt b/src/copyright.txt\nindex 1234567..89abcde 100644\n--- a/src/copyright.txt\n+++ b/src/copyright.txt\n@@ -1 +1 @@\n+Copyright \xa9 1993, 2013, Oracle and/or its affiliates.\n";
+
+    let (temp_dir, output) = run_diff_splitter(diff, &["--mask-linenum", "--skip-header"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        read_output_bytes(&temp_dir, "src/copyright.txt"),
+        b"@@ -0 +0 @@\n+Copyright \xa9 1993, 2013, Oracle and/or its affiliates.\n"
     );
 }

@@ -69,39 +69,39 @@ fn process_input<R: BufRead>(
     let mut buffer = Vec::new();
 
     while reader.read_until(b'\n', &mut buffer)? != 0 {
-        let line = decode_line(&buffer)?;
+        let line = decode_line(&buffer);
 
         match parser_state {
             ParserState::Idle => {
-                if is_binary_summary_line(&line) {
-                    binary_file_lines.push(line.trim_end().to_string());
-                } else if is_diff_prelude_line(&line) {
+                if is_binary_summary_line(&line.text) {
+                    binary_file_lines.push(line.text.trim_end().to_string());
+                } else if is_diff_prelude_line(&line.text) {
                     current_section.start(line);
                     parser_state = ParserState::Header;
-                } else if line.starts_with("--- ") {
+                } else if line.text.starts_with("--- ") {
                     current_section.start(line);
                     parser_state = ParserState::Header;
-                } else if !line.trim().is_empty() {
-                    return Err(invalid_diff_error("Invalid diff format", &line));
+                } else if !line.text.trim().is_empty() {
+                    return Err(invalid_diff_error("Invalid diff format", &line.text));
                 }
             }
             ParserState::Header => {
-                if is_diff_prelude_line(&line) {
+                if is_diff_prelude_line(&line.text) {
                     flush_section(&mut current_section, args, re, re_combine)?;
                     current_section.start(line);
-                } else if is_binary_summary_line(&line) {
-                    binary_file_lines.push(line.trim_end().to_string());
+                } else if is_binary_summary_line(&line.text) {
+                    binary_file_lines.push(line.text.trim_end().to_string());
                     current_section.clear();
                     parser_state = ParserState::Idle;
                 } else {
                     current_section.push(line.clone());
-                    if is_body_start_line(&line) {
+                    if is_body_start_line(&line.text) {
                         parser_state = ParserState::Body;
                     }
                 }
             }
             ParserState::Body => {
-                if is_diff_prelude_line(&line) {
+                if is_diff_prelude_line(&line.text) {
                     flush_section(&mut current_section, args, re, re_combine)?;
                     current_section.start(line);
                     parser_state = ParserState::Header;
@@ -121,20 +121,20 @@ fn process_input<R: BufRead>(
 
 #[derive(Default)]
 struct DiffSection {
-    lines: Vec<String>,
+    lines: Vec<DiffLine>,
     header_from_path: Option<String>,
     header_to_path: Option<String>,
 }
 
 impl DiffSection {
-    fn start(&mut self, line: String) {
+    fn start(&mut self, line: DiffLine) {
         self.clear();
-        self.capture_diff_header_paths(&line);
+        self.capture_diff_header_paths(&line.text);
         self.lines.push(line);
     }
 
-    fn push(&mut self, line: String) {
-        self.capture_diff_header_paths(&line);
+    fn push(&mut self, line: DiffLine) {
+        self.capture_diff_header_paths(&line.text);
         self.lines.push(line);
     }
 
@@ -196,19 +196,25 @@ fn flush_section(
     Ok(())
 }
 
-fn section_has_processable_content(lines: &[String]) -> bool {
+fn section_has_processable_content(lines: &[DiffLine]) -> bool {
     lines.iter().any(|line| {
-        line.starts_with("--- ") || line.starts_with("+++ ") || is_body_start_line(line)
+        line.text.starts_with("--- ")
+            || line.text.starts_with("+++ ")
+            || is_body_start_line(&line.text)
     })
 }
 
-fn decode_line(buffer: &[u8]) -> io::Result<String> {
-    String::from_utf8(buffer.to_vec()).map_err(|err| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("Input diff is not valid UTF-8: {err}"),
-        )
-    })
+#[derive(Clone)]
+struct DiffLine {
+    raw: Vec<u8>,
+    text: String,
+}
+
+fn decode_line(buffer: &[u8]) -> DiffLine {
+    DiffLine {
+        raw: buffer.to_vec(),
+        text: String::from_utf8_lossy(buffer).into_owned(),
+    }
 }
 
 fn invalid_diff_error(message: &str, line: &str) -> io::Error {
@@ -372,11 +378,11 @@ fn extract_path(line: &str, prefix: &str) -> String {
     trimmed.to_string()
 }
 
-fn find_header_path(lines: &[String], prefix: &str) -> Option<String> {
+fn find_header_path(lines: &[DiffLine], prefix: &str) -> Option<String> {
     lines
         .iter()
-        .filter(|line| line.starts_with(prefix))
-        .map(|line| extract_path(line, prefix))
+        .filter(|line| line.text.starts_with(prefix))
+        .map(|line| extract_path(&line.text, prefix))
         .last()
 }
 
@@ -389,7 +395,7 @@ fn select_output_path(from_path: Option<&str>, to_path: Option<&str>) -> Option<
 }
 
 fn process_file_diff(
-    lines: &[String],
+    lines: &[DiffLine],
     output_path_buf: &PathBuf,
     from_path_hint: Option<&str>,
     to_path_hint: Option<&str>,
@@ -426,7 +432,7 @@ fn process_file_diff(
     let mut header_processed = false;
 
     for line in lines {
-        let trimmed_line = line.trim_end();
+        let trimmed_line = line.text.trim_end();
 
         if !header_processed {
             if args.skip_header && is_skippable_header_line(trimmed_line) {
@@ -492,10 +498,10 @@ fn process_file_diff(
                     });
                 write!(output_file_handle, "{}", modified_line)?;
             } else {
-                write!(output_file_handle, "{}", line)?;
+                output_file_handle.write_all(&line.raw)?;
             }
         } else {
-            write!(output_file_handle, "{}", line)?;
+            output_file_handle.write_all(&line.raw)?;
         }
     }
 
@@ -624,8 +630,7 @@ fn first_path_component(path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        calculate_strip_value, decode_line, extract_path, is_skippable_header_line,
-        sanitize_output_path,
+        calculate_strip_value, extract_path, is_skippable_header_line, sanitize_output_path,
     };
     use std::path::Path;
 
@@ -694,8 +699,7 @@ mod tests {
     }
 
     #[test]
-    fn decode_line_rejects_invalid_utf8() {
-        let err = decode_line(&[0xff, b'\n']).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    fn strip_path_handles_plain_file_names_without_parents() {
+        assert_eq!(calculate_strip_value("before.txt", "after.txt"), 0);
     }
 }

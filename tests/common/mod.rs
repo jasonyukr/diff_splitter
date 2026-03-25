@@ -61,6 +61,10 @@ pub fn read_output(temp_dir: &TempDir, relative_path: &str) -> String {
     fs::read_to_string(temp_dir.path().join(relative_path)).unwrap()
 }
 
+pub fn read_output_bytes(temp_dir: &TempDir, relative_path: &str) -> Vec<u8> {
+    fs::read(temp_dir.path().join(relative_path)).unwrap()
+}
+
 pub fn list_output_files(temp_dir: &TempDir) -> Vec<String> {
     let mut files = Vec::new();
     collect_files(temp_dir.path(), temp_dir.path(), &mut files);

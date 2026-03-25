@@ -1,6 +1,6 @@
 mod common;
 
-use common::{list_output_files, read_output, run_diff_splitter};
+use common::{list_output_files, read_output, read_output_bytes, run_diff_splitter};
 
 #[test]
 fn skip_header_keeps_binary_entries_out_of_following_text_file() {
@@ -28,8 +28,8 @@ fn skip_header_keeps_binary_entries_out_of_following_text_file() {
     );
 
     assert_eq!(
-        read_output(&temp_dir, "__BINARY_FILES__.txt"),
-        "Binary files a/jdk/make/closed/tools/crypto/jce/sunjce_provider.jar and b/jdk/make/closed/tools/crypto/jce/sunjce_provider.jar differ\n"
+        read_output_bytes(&temp_dir, "__BINARY_FILES__.txt"),
+        b"Binary files a/jdk/make/closed/tools/crypto/jce/sunjce_provider.jar and b/jdk/make/closed/tools/crypto/jce/sunjce_provider.jar differ\n"
     );
     assert_eq!(
         list_output_files(&temp_dir),
