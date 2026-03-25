@@ -1,10 +1,10 @@
+use clap::Parser;
+use regex::Regex;
 use std::{
     fs::{self, File},
     io::{self, BufRead, BufReader, Write},
     path::PathBuf,
 };
-use regex::Regex;
-use clap::Parser;
 
 /// Splits a unified diff from standard input into individual files in a target directory.
 #[derive(Parser, Debug)]
@@ -42,7 +42,9 @@ fn main() -> io::Result<()> {
     // Regex for generalizing "@@" lines
     let re = Regex::new(r"(@@ -[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@)").unwrap();
     // Regex for "@@@" lines ("--cc" and "--combined")
-    let re_combine = Regex::new(r"(@@@ -[0-9]+)(,[0-9]+)?( \-[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@@)").unwrap();
+    let re_combine =
+        Regex::new(r"(@@@ -[0-9]+)(,[0-9]+)?( \-[0-9]+)(,[0-9]+)?( \+[0-9]+)(,[0-9]+)?( @@@)")
+            .unwrap();
 
     let mut buffer = Vec::new();
     let mut header_state = HeaderState::Diff;
@@ -54,7 +56,13 @@ fn main() -> io::Result<()> {
             HeaderState::Diff => {
                 if line.starts_with("diff --") {
                     if !current_file_lines.is_empty() && full_path.is_some() {
-                        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &args, &re, &re_combine)?;
+                        process_file_diff(
+                            &current_file_lines,
+                            full_path.as_ref().unwrap(),
+                            &args,
+                            &re,
+                            &re_combine,
+                        )?;
                     }
                     current_file_lines.clear();
                     full_path = None;
@@ -72,6 +80,11 @@ fn main() -> io::Result<()> {
                 if line.starts_with("--- ") {
                     current_file_lines.push(line.clone());
                     header_state = HeaderState::To;
+                } else if line.starts_with("Binary files ") {
+                    binary_file_lines.push(line.trim_end().to_string());
+                    current_file_lines.clear();
+                    full_path = None;
+                    header_state = HeaderState::Diff;
                 } else if line.starts_with("+++ ") {
                     eprintln!("Error: Invalid diff format. Expected '---' or metadata line !!!!");
                     eprintln!("{}", line);
@@ -107,7 +120,13 @@ fn main() -> io::Result<()> {
             HeaderState::Body => {
                 if line.starts_with("diff --") {
                     if !current_file_lines.is_empty() && full_path.is_some() {
-                        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &args, &re, &re_combine)?;
+                        process_file_diff(
+                            &current_file_lines,
+                            full_path.as_ref().unwrap(),
+                            &args,
+                            &re,
+                            &re_combine,
+                        )?;
                     }
                     current_file_lines.clear();
                     full_path = None;
@@ -126,7 +145,13 @@ fn main() -> io::Result<()> {
 
     // Process the last file's diff
     if !current_file_lines.is_empty() && full_path.is_some() {
-        process_file_diff(&current_file_lines, full_path.as_ref().unwrap(), &args, &re, &re_combine)?;
+        process_file_diff(
+            &current_file_lines,
+            full_path.as_ref().unwrap(),
+            &args,
+            &re,
+            &re_combine,
+        )?;
     }
 
     // Save the "Binary files" lines to distinct file
@@ -138,7 +163,10 @@ fn main() -> io::Result<()> {
         }
     }
 
-    println!("Processing complete. Files created in '{}'.", args.target_path.display());
+    println!(
+        "Processing complete. Files created in '{}'.",
+        args.target_path.display()
+    );
     Ok(())
 }
 
@@ -173,7 +201,6 @@ fn process_file_diff(
         .map(|line| extract_path(line, "+++ "))
         .unwrap_or("");
 
-
     let strip_value = if args.strip == -1 {
         calculate_strip_value(from_path_str, to_path_str)
     } else {
@@ -186,10 +213,9 @@ fn process_file_diff(
         if components.len() > strip_value {
             components[strip_value..].iter().collect::<PathBuf>()
         } else {
-            full_path_buf.file_name().map_or_else(
-                || PathBuf::from(""),
-                |os_str| PathBuf::from(os_str),
-            )
+            full_path_buf
+                .file_name()
+                .map_or_else(|| PathBuf::from(""), |os_str| PathBuf::from(os_str))
         }
     } else {
         full_path_buf.clone()
@@ -215,13 +241,16 @@ fn process_file_diff(
         let trimmed_line = line.trim_end();
 
         if !header_processed {
-            if args.skip_header && (trimmed_line.starts_with("diff --") ||
-                trimmed_line.starts_with("index") ||
-                trimmed_line.starts_with("new") ||
-                trimmed_line.starts_with("old") ||
-                trimmed_line.starts_with("similarity") ||
-                trimmed_line.starts_with("rename") ||
-                trimmed_line.starts_with("--- ") || trimmed_line.starts_with("+++ ")) {
+            if args.skip_header
+                && (trimmed_line.starts_with("diff --")
+                    || trimmed_line.starts_with("index")
+                    || trimmed_line.starts_with("new")
+                    || trimmed_line.starts_with("old")
+                    || trimmed_line.starts_with("similarity")
+                    || trimmed_line.starts_with("rename")
+                    || trimmed_line.starts_with("--- ")
+                    || trimmed_line.starts_with("+++ "))
+            {
                 continue;
             }
             header_processed = true;
@@ -263,21 +292,25 @@ fn process_file_diff(
                     line_to_process = trimmed_line.to_string();
                 }
 
-                let modified_line = re_combine.replace_all(&line_to_process, |caps: &regex::Captures| {
-                    let g1 = caps.get(1).map_or("", |m| m.as_str());
-                    let g2 = caps.get(2).map_or("", |m| m.as_str());
-                    let g3 = caps.get(3).map_or("", |m| m.as_str());
-                    let g4 = caps.get(4).map_or("", |m| m.as_str());
-                    let g5 = caps.get(5).map_or("", |m| m.as_str());
-                    let g6 = caps.get(6).map_or("", |m| m.as_str());
-                    let g7 = caps.get(7).map_or("", |m| m.as_str());
+                let modified_line =
+                    re_combine.replace_all(&line_to_process, |caps: &regex::Captures| {
+                        let g1 = caps.get(1).map_or("", |m| m.as_str());
+                        let g2 = caps.get(2).map_or("", |m| m.as_str());
+                        let g3 = caps.get(3).map_or("", |m| m.as_str());
+                        let g4 = caps.get(4).map_or("", |m| m.as_str());
+                        let g5 = caps.get(5).map_or("", |m| m.as_str());
+                        let g6 = caps.get(6).map_or("", |m| m.as_str());
+                        let g7 = caps.get(7).map_or("", |m| m.as_str());
 
-                    let g1_x = re_digit.replace_all(g1, "0");
-                    let g3_x = re_digit.replace_all(g3, "0");
-                    let g5_x = re_digit.replace_all(g5, "0");
+                        let g1_x = re_digit.replace_all(g1, "0");
+                        let g3_x = re_digit.replace_all(g3, "0");
+                        let g5_x = re_digit.replace_all(g5, "0");
 
-                    format!("{}{}{}{}{}{}{}{}\n", g1_x, g2, g3_x, g4, g5_x, g6, g7, line_remain)
-                });
+                        format!(
+                            "{}{}{}{}{}{}{}{}\n",
+                            g1_x, g2, g3_x, g4, g5_x, g6, g7, line_remain
+                        )
+                    });
                 write!(output_file_handle, "{}", modified_line)?;
             } else {
                 write!(output_file_handle, "{}", line)?;
@@ -291,12 +324,57 @@ fn process_file_diff(
 }
 
 fn calculate_strip_value(from_path: &str, to_path: &str) -> usize {
+    if from_path == "/dev/null" {
+        return strip_prefixed_git_path(to_path);
+    }
+
+    if to_path == "/dev/null" {
+        return strip_prefixed_git_path(from_path);
+    }
+
     let from_path_buf = PathBuf::from(from_path);
     let from_components: Vec<_> = from_path_buf.components().collect();
     let to_path_buf = PathBuf::from(to_path);
     let to_components: Vec<_> = to_path_buf.components().collect();
 
-    let common_suffix_len = from_components.iter().rev().zip(to_components.iter().rev()).take_while(|(a, b)| a == b).count();
+    let common_suffix_len = from_components
+        .iter()
+        .rev()
+        .zip(to_components.iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
 
     from_components.len() - common_suffix_len
+}
+
+fn strip_prefixed_git_path(path: &str) -> usize {
+    PathBuf::from(path)
+        .iter()
+        .next()
+        .and_then(|component| component.to_str())
+        .map(|component| usize::from(matches!(component, "a" | "b")))
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::calculate_strip_value;
+
+    #[test]
+    fn auto_strip_handles_git_paths_for_modified_files() {
+        assert_eq!(calculate_strip_value("a/src/main.rs", "b/src/main.rs"), 1);
+    }
+
+    #[test]
+    fn auto_strip_handles_new_git_file_paths() {
+        assert_eq!(
+            calculate_strip_value("/dev/null", "b/jdk/make/closed/bundles.gmk"),
+            1,
+        );
+    }
+
+    #[test]
+    fn auto_strip_handles_deleted_git_file_paths() {
+        assert_eq!(calculate_strip_value("a/src/main.rs", "/dev/null"), 1);
+    }
 }
